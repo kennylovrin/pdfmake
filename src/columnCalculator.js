@@ -4,7 +4,9 @@ var isString = require('./helpers').isString;
 
 function buildColumnWidths(columns, availableWidth) {
 	var autoColumns = [],
-		autoMin = 0, autoMax = 0,
+		autoMin = 0,
+		autoMax = 0,
+		autoStarMax = 0,
 		starColumns = [],
 		starMaxMin = 0,
 		starMaxMax = 0,
@@ -16,6 +18,9 @@ function buildColumnWidths(columns, availableWidth) {
 			autoColumns.push(column);
 			autoMin += column._minWidth;
 			autoMax += column._maxWidth;
+			if (column.width === 'auto*') {
+				autoStarMax += column._maxWidth;
+			}
 		} else if (isStarColumn(column)) {
 			starColumns.push(column);
 			starMaxMin = Math.max(starMaxMin, column._minWidth);
@@ -28,9 +33,9 @@ function buildColumnWidths(columns, availableWidth) {
 	fixedColumns.forEach(function (col) {
 		// width specified as %
 		if (isString(col.width) && /\d+%/.test(col.width)) {
-			col.width = parseFloat(col.width) * initial_availableWidth / 100;
+			col.width = (parseFloat(col.width) * initial_availableWidth) / 100;
 		}
-		if (col.width < (col._minWidth) && col.elasticWidth) {
+		if (col.width < col._minWidth && col.elasticWidth) {
 			col._calcWidth = col._minWidth;
 		} else {
 			col._calcWidth = col.width;
@@ -59,18 +64,32 @@ function buildColumnWidths(columns, availableWidth) {
 	} else {
 		if (maxW < availableWidth) {
 			// case 2 - we can fit rest of the table within available space
+
+			// get the space available to grow, in case there are 'auto*' cols
+			var growableWidth = availableWidth - (autoMax - autoStarMax) - starMaxMax;
+
 			autoColumns.forEach(function (col) {
-				col._calcWidth = col._maxWidth;
+				if (col.width === 'auto*') {
+					// this is a greedy column, allow it to grow in
+					// proportion to the other greedy columns
+					var scale = col._maxWidth / autoStarMax;
+					col._calcWidth = scale * growableWidth;
+				} else {
+					// this is a standard 'auto' col, just give it what it needs to fit
+					col._calcWidth = col._maxWidth;
+				}
 				availableWidth -= col._calcWidth;
 			});
 		} else {
 			// maxW is too large, but minW fits within available width
+			// here the cols have to fight for space and there is no difference
+			// in priority between 'auto' and 'auto*', they act the same & like always
 			var W = availableWidth - minW;
 			var D = maxW - minW;
 
 			autoColumns.forEach(function (col) {
 				var d = col._maxWidth - col._minWidth;
-				col._calcWidth = col._minWidth + d * W / D;
+				col._calcWidth = col._minWidth + (d * W) / D;
 				availableWidth -= col._calcWidth;
 			});
 		}
@@ -86,11 +105,16 @@ function buildColumnWidths(columns, availableWidth) {
 }
 
 function isAutoColumn(column) {
-	return column.width === 'auto';
+	return column.width === 'auto' || column.width === 'auto*';
 }
 
 function isStarColumn(column) {
-	return column.width === null || column.width === undefined || column.width === '*' || column.width === 'star';
+	return (
+		column.width === null ||
+		column.width === undefined ||
+		column.width === '*' ||
+		column.width === 'star'
+	);
 }
 
 //TODO: refactor and reuse in measureTable
@@ -111,8 +135,8 @@ function measureMinMax(columns) {
 			result.min += c._minWidth;
 			result.max += c._maxWidth;
 		} else {
-			result.min += ((c.width !== undefined && c.width) || c._minWidth);
-			result.max += ((c.width !== undefined && c.width) || c._maxWidth);
+			result.min += (c.width !== undefined && c.width) || c._minWidth;
+			result.max += (c.width !== undefined && c.width) || c._maxWidth;
 		}
 	}
 
